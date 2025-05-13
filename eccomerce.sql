@@ -190,3 +190,15 @@ INSERT INTO funcionario (nome, idade, sexo, cargo, salario, nascimento) VALUES
 ('Marcos Coelho', 29, 'm', 'vendedor', 3500.00, '1995-06-24'),
 ('Juliana Cabral', 32, 'f', 'vendedor', 3600.00, '1992-10-05'),
 ('Rafael Braga', 40, 'm', 'gerente', 8800.00, '1984-07-19');
+
+CREATE USER 'administrador'@'localhost' IDENTIFIED BY 'admin123';
+CREATE USER 'gerente'@'localhost' IDENTIFIED BY 'gerente123';
+CREATE USER 'funcionario'@'localhost' IDENTIFIED BY 'funcionario123';
+
+GRANT ALL PRIVILEGES ON ecommerce.* TO 'administrador'@'localhost';
+
+GRANT SELECT, UPDATE, DELETE ON ecommerce.* TO 'gerente'@'localhost';
+
+GRANT INSERT, SELECT ON ecommerce.* TO 'funcionario'@'localhost';
+
+FLUSH PRIVILEGES;
