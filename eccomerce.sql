@@ -200,5 +200,5 @@ GRANT ALL PRIVILEGES ON ecommerce.* TO 'administrador'@'localhost';
 GRANT SELECT, UPDATE, DELETE ON ecommerce.* TO 'gerente'@'localhost';
 
 GRANT INSERT, SELECT ON ecommerce.* TO 'funcionario'@'localhost';
-
+ 
 FLUSH PRIVILEGES;
