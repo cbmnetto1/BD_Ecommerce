@@ -8,7 +8,6 @@ CREATE TABLE cliente (
     sexo CHAR(1) CHECK (sexo IN ('m', 'f', 'o')),
     idade INT CHECK (idade >= 0),
     nascimento DATE NOT NULL
-    
 );
 
 CREATE TABLE clienteespecial (
@@ -203,9 +202,8 @@ GRANT INSERT, SELECT ON ecommerce.* TO 'funcionario'@'localhost';
  
 FLUSH PRIVILEGES;
 
-/* triggers 
+/* Inicio das triggers */ 
 
-*/ 
 CREATE OR REPLACE VIEW vendas_por_vendedor AS 
 SELECT v.id_vendedor, SUM(iv.quantidade * iv.valor_unitario) AS total_vendido
 FROM venda v
@@ -224,7 +222,7 @@ BEGIN
 
     SELECT id_vendedor INTO funcionario_id
     FROM venda
-    WHERE id = New.id_venda 
+    WHERE id = NEW.id_venda;
 
     SELECT SUM(iv.quantidade * iv.valor_unitario)
     INTO total
@@ -238,12 +236,11 @@ BEGIN
         INSERT INTO funcionarioespecial (id_funcionario, total_vendido, bonus)
         VALUES (funcionario_id, total, bonus)
         ON DUPLICATE KEY UPDATE total_vendido = total, bonus = bonus;
-
-END IF;
+    END IF;
 END;
 //
 
-DELIMITER;
+DELIMITER ;
 
 CREATE OR REPLACE VIEW gastos_por_cliente AS 
 SELECT v.id_cliente, SUM(iv.quantidade * iv.valor_unitario) AS total_gasto 
@@ -259,7 +256,7 @@ FOR EACH ROW
 BEGIN 
     DECLARE cliente_id INT;
     DECLARE total DECIMAL(10,2);
-    DECLARE cashback DECIMAL (10,2);
+    DECLARE cashback DECIMAL(10,2);
 
     SELECT id_cliente INTO cliente_id
     FROM venda 
@@ -275,27 +272,93 @@ BEGIN
         SET cashback = total * 0.02;
 
         INSERT INTO clienteespecial (nome, sexo, idade, id_cliente, cashback )
-        SELECT c.nome, c.sexo, c.idade. c.id, cashback 
+        SELECT c.nome, c.sexo, c.idade, c.id, cashback 
         FROM cliente c
         WHERE c.id = cliente_id 
         ON DUPLICATE KEY UPDATE cashback = cashback;
+    END IF;
+END;
+//
 
-        END IF;
-    END;
-    //
+DELIMITER ;
 
-    DELIMITER;
+DELIMITER //
 
-    DELIMITER // 
+CREATE TRIGGER trg_remover_cliente_especial 
+AFTER UPDATE ON clienteespecial
+FOR EACH ROW 
+BEGIN 
+    IF NEW.cashback = 0 THEN
+        DELETE FROM clienteespecial WHERE id = NEW.id;
+    END IF;
+END;
+//
 
-    CREATE TRIGGER trg_remover_cliente_especial 
-    AFTER UPDATE ON clienteespecial
-    FOR EACH ROW 
-    BEGIN 
-        IF NEW.cashback = 0 THEN
-            DELETE FROM clienteespecial WHERE id = new.id;
-        END IF;
-    END;
-    //
+DELIMITER ;
 
-    DELIMITER;
+DELIMITER //
+
+CREATE PROCEDURE ReajusteSalario(IN cargo_tipo VARCHAR(20), IN percentual DECIMAL(5,2))
+BEGIN
+    UPDATE funcionario
+    SET salario = salario * (1 + (percentual / 100))
+    WHERE cargo = cargo_tipo;
+END;
+//
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE SorteioClientes()
+BEGIN
+    DECLARE cliente_nativo INT;
+    DECLARE cliente_especial INT;
+
+    SELECT id INTO cliente_nativo
+    FROM cliente
+    ORDER BY RAND()
+    LIMIT 1;
+
+    SELECT id_cliente INTO cliente_especial
+    FROM clienteespecial
+    ORDER BY RAND()
+    LIMIT 1;
+
+    INSERT INTO vouchers (id_cliente, valor) VALUES (cliente_nativo, 200.00);
+    INSERT INTO vouchers (id_cliente, valor) VALUES (cliente_especial, 200.00);
+END;
+//
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE RegistrarVenda(IN id_cliente INT, IN id_vendedor INT, IN id_produto INT, IN quantidade INT, IN valor_unitario DECIMAL(10,2))
+BEGIN
+    DECLARE venda_id INT;
+
+    INSERT INTO venda (id_cliente, id_vendedor) VALUES (id_cliente, id_vendedor);
+    SET venda_id = LAST_INSERT_ID();
+
+    INSERT INTO item_venda (id_venda, id_produto, quantidade, valor_unitario) VALUES (venda_id, id_produto, quantidade, valor_unitario);
+END;
+//
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE EstatisticasVendas()
+BEGIN
+    SELECT 
+        COUNT(id) AS total_vendas,
+        (SELECT id_produto FROM item_venda GROUP BY id_produto ORDER BY SUM(quantidade) DESC LIMIT 1) AS produto_mais_vendido,
+        (SELECT SUM(quantidade * valor_unitario) FROM item_venda GROUP BY id_produto ORDER BY SUM(quantidade) DESC LIMIT 1) AS valor_arrecadado_produto_mais_vendido,
+        (SELECT SUM(valor_unitario) FROM item_venda GROUP BY id_produto ORDER BY SUM(quantidade) DESC LIMIT 1) AS valor_ganho_produto_mais_vendido,
+        (SELECT MONTH(data) FROM venda GROUP BY MONTH(data) ORDER BY COUNT(id) ASC LIMIT 1) AS mes_menos_vendas
+    FROM venda;
+END;
+//
+
+DELIMITER ;
