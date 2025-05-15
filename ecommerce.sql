@@ -59,6 +59,54 @@ CREATE TABLE item_venda (
     valor_unitario DECIMAL(10,2) NOT NULL
 );
 
+CREATE TABLE vouchers (
+    id SERIAL PRIMARY KEY,
+    id_cliente INT NOT NULL,
+    valor DECIMAL(10,2) NOT NULL,
+    data_emissao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    utilizado BOOLEAN DEFAULT FALSE,
+    codigo VARCHAR(20) UNIQUE,
+    FOREIGN KEY (id_cliente) REFERENCES cliente(id) ON DELETE CASCADE
+);
+
+-- VIEW 1 Relatório de vendas por vendedor com detalhes
+CREATE OR REPLACE VIEW relatorio_vendas_vendedor AS
+SELECT 
+    f.id AS id_vendedor,
+    f.nome AS nome_vendedor,
+    f.cargo,
+    COUNT(v.id) AS total_vendas,
+    SUM(iv.quantidade * iv.valor_unitario) AS valor_total_vendido,
+    SUM(iv.quantidade) AS itens_vendidos
+FROM funcionario f
+LEFT JOIN venda v ON f.id = v.id_vendedor
+LEFT JOIN item_venda iv ON v.id = iv.id_venda
+GROUP BY f.id, f.nome, f.cargo
+ORDER BY valor_total_vendido DESC;
+
+-- VIEW 2 Relatório de clientes especiais e seus benefícis
+CREATE OR REPLACE VIEW relatorio_clientes_especiais AS
+SELECT 
+    ce.id,
+    c.nome AS cliente,
+    c.idade,
+    c.sexo,
+    ce.cashback AS cashback_acumulado,
+    (SELECT COUNT(*) FROM venda WHERE id_cliente = c.id) AS total_compras,
+    (SELECT SUM(iv.quantidade * iv.valor_unitario) 
+     FROM venda v 
+     JOIN item_venda iv ON v.id = iv.id_venda 
+     WHERE v.id_cliente = c.id) AS total_gasto
+FROM clienteespecial ce
+JOIN cliente c ON ce.id_cliente = c.id
+ORDER BY total_gasto DESC;
+
+-- VIEW 3 Estoque crítico (produtos com menos de 10 unidades)
+CREATE OR REPLACE VIEW estoque_critico AS
+SELECT 
+    p.id,
+    p.nome,
+
 INSERT INTO cliente (nome, sexo, idade, nascimento) VALUES
 ('Gustavo Dias', 'm', 21, '2004-01-06'),
 ('Miguel Farias', 'm', 22, '2003-01-30'),
@@ -309,56 +357,84 @@ END;
 DELIMITER ;
 
 DELIMITER //
-
 CREATE PROCEDURE SorteioClientes()
 BEGIN
-    DECLARE cliente_nativo INT;
-    DECLARE cliente_especial INT;
-
-    SELECT id INTO cliente_nativo
-    FROM cliente
-    ORDER BY RAND()
-    LIMIT 1;
-
-    SELECT id_cliente INTO cliente_especial
-    FROM clienteespecial
-    ORDER BY RAND()
-    LIMIT 1;
-
-    INSERT INTO vouchers (id_cliente, valor) VALUES (cliente_nativo, 200.00);
-    INSERT INTO vouchers (id_cliente, valor) VALUES (cliente_especial, 200.00);
-END;
-//
-
+    DECLARE cliente_sorteado INT;
+    DECLARE valor_voucher DECIMAL(10,2);
+    DECLARE codigo_voucher VARCHAR(20);
+    
+    SELECT id INTO cliente_sorteado FROM cliente ORDER BY RAND() LIMIT 1;
+    
+    -- Verifica se é cliente especial para definir o valor
+    IF EXISTS (SELECT 1 FROM clienteespecial WHERE id_cliente = cliente_sorteado) THEN
+        SET valor_voucher = 200.00;
+    ELSE
+        SET valor_voucher = 100.00;
+    END IF;
+    
+    -- Gera um código único para o voucher
+    SET codigo_voucher = CONCAT('VOUCHER-', FLOOR(RAND() * 1000000));
+    
+    INSERT INTO vouchers (id_cliente, valor, codigo)
+    VALUES (cliente_sorteado, valor_voucher, codigo_voucher);
+    
+    SELECT CONCAT('Cliente sorteado: ', (SELECT nome FROM cliente WHERE id = cliente_sorteado), 
+                  ' - Voucher: ', codigo_voucher, 
+                  ' - Valor: R$ ', valor_voucher) AS resultado;
+END //
 DELIMITER ;
 
 DELIMITER //
-
 CREATE PROCEDURE RegistrarVenda(IN id_cliente INT, IN id_vendedor INT, IN id_produto INT, IN quantidade INT, IN valor_unitario DECIMAL(10,2))
 BEGIN
     DECLARE venda_id INT;
-
-    INSERT INTO venda (id_cliente, id_vendedor) VALUES (id_cliente, id_vendedor);
-    SET venda_id = LAST_INSERT_ID();
-
-    INSERT INTO item_venda (id_venda, id_produto, quantidade, valor_unitario) VALUES (venda_id, id_produto, quantidade, valor_unitario);
-END;
-//
-
+    DECLARE estoque_atual INT;
+    
+    -- Verificar estoque
+    SELECT qtd INTO estoque_atual FROM produto WHERE id_produto = id_produto;
+    
+    IF estoque_atual >= quantidade THEN
+        -- Registrar venda
+        INSERT INTO venda (id_cliente, id_vendedor, dia_venda) VALUES (id_cliente, id_vendedor, NOW());
+        SET venda_id = LAST_INSERT_ID();
+        
+        -- Registrar itens
+        INSERT INTO item_venda (id_venda, id_produto, quantidade, valor_unitario) 
+        VALUES (venda_id, id_produto, quantidade, valor_unitario);
+        
+        -- Atualizar estoque
+        UPDATE produto SET qtd = qtd - quantidade WHERE id_produto = id_produto;
+    ELSE
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Estoque insuficiente';
+    END IF;
+END //
 DELIMITER ;
 
 DELIMITER //
-
 CREATE PROCEDURE EstatisticasVendas()
 BEGIN
+    -- Produto mais vendido
+    SELECT p.nome as produto_mais_vendido, SUM(iv.quantidade) as quantidade
+    FROM item_venda iv
+    JOIN produto p ON iv.id_produto = p.id_produto
+    GROUP BY iv.id_produto
+    ORDER BY quantidade DESC
+    LIMIT 1;
+    
+    -- Produto menos vendido
+    SELECT p.nome as produto_menos_vendido, SUM(iv.quantidade) as quantidade
+    FROM item_venda iv
+    JOIN produto p ON iv.id_produto = p.id_produto
+    GROUP BY iv.id_produto
+    ORDER BY quantidade ASC
+    LIMIT 1;
+    
+    -- Meses com maior/menor vendas
     SELECT 
-        COUNT(id) AS total_vendas,
-        (SELECT id_produto FROM item_venda GROUP BY id_produto ORDER BY SUM(quantidade) DESC LIMIT 1) AS produto_mais_vendido,
-        (SELECT SUM(quantidade * valor_unitario) FROM item_venda GROUP BY id_produto ORDER BY SUM(quantidade) DESC LIMIT 1) AS valor_arrecadado_produto_mais_vendido,
-        (SELECT SUM(valor_unitario) FROM item_venda GROUP BY id_produto ORDER BY SUM(quantidade) DESC LIMIT 1) AS valor_ganho_produto_mais_vendido,
-        (SELECT MONTH(data) FROM venda GROUP BY MONTH(data) ORDER BY COUNT(id) ASC LIMIT 1) AS mes_menos_vendas
-    FROM venda;
-END;
-//
-
+        MONTH(v.dia_venda) as mes,
+        COUNT(v.id_venda) as total_vendas
+    FROM venda v
+    GROUP BY MONTH(v.dia_venda)
+    ORDER BY total_vendas DESC;
+END //
 DELIMITER ;
